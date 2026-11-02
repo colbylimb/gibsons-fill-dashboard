@@ -24,7 +24,7 @@
   :root{
     --navy:#17325E; --teal:#1E47A2; --accent:#798F3C; --light-band:#EEF2F8; --page-bg:#F8FAFC;
     --white:#FFFFFF; --border:#E1E9EF; --body-text:#5D6E78; --muted:#8B99A1;
-    --excluded:#DFE6EA; --error:#b3261e;
+    --excluded:#DFE6EA; --error:#b3261e; --up:#2E7D32; --down:#C62828;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
@@ -90,9 +90,20 @@
   .hero-number{font-size:56px;font-weight:700;line-height:1;color:var(--navy);}
   .hero-card.today .hero-number{color:var(--teal);}
   .hero-sub{font-size:14px;color:var(--body-text);margin-top:6px;font-weight:500;}
+  /* Month-to-date vs same days last month */
+  .hero-num-row{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;}
+  .cmp{display:inline-flex;align-items:center;gap:4px;font-weight:700;white-space:nowrap;}
+  .cmp.big{font-size:24px;}
+  .cmp.small{font-size:18px;}
+  .cmp.up{color:var(--up);}
+  .cmp.down{color:var(--down);}
+  .cmp.flat{color:var(--muted);}
+  .cmp-note{font-size:13px;color:var(--muted);font-weight:500;margin-top:4px;}
+  .b-num-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px;}
+  .b-num-row .b-number{margin-bottom:0;}
 
   /* Breakdown cards */
-  .breakdown-row{flex-shrink:0;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+  .breakdown-row{flex-shrink:0;display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
   .b-card{
     background:var(--white);
     border:1px solid var(--border);
@@ -262,29 +273,27 @@
       </div>
       <div class="hero-card">
         <div class="hero-label" id="periodLabel">Month-to-Date Total Fills</div>
-        <div class="hero-number" id="mtdTotal">0</div>
+        <div class="hero-num-row">
+          <div class="hero-number" id="mtdTotal">0</div>
+          <span class="cmp big flat" id="mtdCmp"></span>
+        </div>
         <div class="hero-sub" id="mtdSub">—</div>
+        <div class="cmp-note" id="mtdCmpNote"></div>
       </div>
     </div>
 
     <div class="breakdown-row">
       <div class="b-card">
         <div class="b-top"><span class="b-name">Non-Sterile</span></div>
-        <div class="b-number" id="nonSterileNum">0</div>
+        <div class="b-num-row"><div class="b-number" id="nonSterileNum">0</div><span class="cmp small flat" id="nonSterileCmp"></span></div>
         <div class="b-meta"><span id="nonSterilePct">0%</span><span id="nonSterileToday">today: 0</span></div>
         <div class="b-bar-track"><div class="b-bar-fill" id="nonSterileBar" style="width:0%"></div></div>
       </div>
       <div class="b-card">
-        <div class="b-top"><span class="b-name">Sterile — Retail</span></div>
-        <div class="b-number" id="sterileRetailNum">0</div>
-        <div class="b-meta"><span id="sterileRetailPct">0%</span><span id="sterileRetailToday">today: 0</span></div>
-        <div class="b-bar-track"><div class="b-bar-fill" id="sterileRetailBar" style="width:0%"></div></div>
-      </div>
-      <div class="b-card">
-        <div class="b-top"><span class="b-name">Sterile — Clinic</span></div>
-        <div class="b-number" id="sterileClinicNum">0</div>
-        <div class="b-meta"><span id="sterileClinicPct">0%</span><span id="sterileClinicToday">today: 0</span></div>
-        <div class="b-bar-track"><div class="b-bar-fill" id="sterileClinicBar" style="width:0%"></div></div>
+        <div class="b-top"><span class="b-name">Sterile</span></div>
+        <div class="b-num-row"><div class="b-number" id="sterileNum">0</div><span class="cmp small flat" id="sterileCmp"></span></div>
+        <div class="b-meta"><span id="sterilePct">0%</span><span id="sterileToday">today: 0</span></div>
+        <div class="b-bar-track"><div class="b-bar-fill" id="sterileBar" style="width:0%"></div></div>
       </div>
     </div>
 
@@ -336,7 +345,12 @@
 </div>
 
 <script>
+// Data source. Still the Apps Script Web App until the Power Automate API flow
+// is live, then swap this for the flow's HTTP URL (see setup doc, Step 7).
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbysyC_OwwoWgwzAPGEsEj6pWxtxKiF5mirI2EjvSXe_tnQgSqcCf7zcSj6g4uFLaLDf8g/exec';
+// Power Automate HTTP triggers only accept POST, so reads there are an empty
+// POST. Apps Script reads stay GET.
+const READS_USE_POST = !WEB_APP_URL.includes('script.google.com');
 const HISTORY_CACHE_KEY = 'gibsons_fill_history_cache_v1';
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000; // poll shared history every 2 min
 
@@ -345,7 +359,23 @@ function webAppConfigured(){
 }
 
 function emptyDayRecord(){
-  return {nonSterile:0, sterileRetail:0, sterileClinic:0};
+  return {nonSterile:0, sterile:0};
+}
+
+// Two buckets only. Older records (and the Apps Script backend) still carry
+// sterileRetail / sterileClinic, so add those together into sterile.
+function normDay(r){
+  if(!r) return emptyDayRecord();
+  const n = v => { const x = Number(v); return isNaN(x) ? 0 : x; };
+  const sterile = (r.sterile !== undefined && r.sterile !== null)
+    ? n(r.sterile) : n(r.sterileRetail) + n(r.sterileClinic);
+  return {nonSterile:n(r.nonSterile), sterile};
+}
+
+function normHistory(h){
+  const days = {};
+  Object.keys((h && h.days) || {}).forEach(iso => { days[iso] = normDay(h.days[iso]); });
+  return {days, updatedAt:(h && h.updatedAt) || null, lastSource:(h && h.lastSource) || null};
 }
 
 let historyCache = {days:{}, updatedAt:null, lastSource:null};
@@ -355,20 +385,22 @@ function loadCachedHistory(){
     const raw = localStorage.getItem(HISTORY_CACHE_KEY);
     if(raw){
       const parsed = JSON.parse(raw);
-      if(parsed && parsed.days) historyCache = parsed;
+      if(parsed && parsed.days) historyCache = normHistory(parsed);
     }
   }catch(e){ /* ignore — fall back to empty history */ }
 }
 
 function cacheHistory(h){
-  historyCache = h;
+  historyCache = normHistory(h);
   try{ localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(h)); }catch(e){ /* ignore */ }
 }
 
 async function fetchHistory(){
   if(!webAppConfigured()) return false;
   try{
-    const res = await fetch(WEB_APP_URL, {cache:'no-store'});
+    const res = READS_USE_POST
+      ? await fetch(WEB_APP_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:'', cache:'no-store'})
+      : await fetch(WEB_APP_URL, {cache:'no-store'});
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const json = await res.json();
     if(!json || !json.days) throw new Error('Unexpected response');
@@ -381,9 +413,8 @@ async function fetchHistory(){
 }
 
 // Sent as text/plain (not application/json) so the browser treats this as a
-// "simple request" and skips the CORS preflight — Apps Script Web Apps don't
-// handle preflight OPTIONS requests. The body is still valid JSON; Apps
-// Script parses it from e.postData.contents regardless of the header.
+// "simple request" and skips the CORS preflight. The body is still valid JSON;
+// the backend parses it as JSON regardless of the header.
 async function postToWebApp(payload){
   if(!webAppConfigured()) return {ok:false, message:'Web App URL not configured yet — see SETUP doc.'};
   try{
@@ -461,12 +492,46 @@ function computeRecord(){
   let best = null;
   Object.keys(data).forEach(iso => {
     const r = data[iso];
-    const total = r.nonSterile + r.sterileRetail + r.sterileClinic;
+    const total = r.nonSterile + r.sterile;
     if(total > 0 && (!best || total > best.total)){
       best = {iso, total};
     }
   });
   return best;
+}
+
+const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Sums one month's days 1..throughDay (capped at that month's length).
+function sumMonth(data, ym, throughDay){
+  const y = parseInt(ym.slice(0,4)), m = parseInt(ym.slice(5,7));
+  const last = Math.min(throughDay, new Date(y, m, 0).getDate());
+  let nonSterile=0, sterile=0;
+  for(let d=1; d<=last; d++){
+    const rec = data[ym+'-'+String(d).padStart(2,'0')];
+    if(rec){ nonSterile += rec.nonSterile; sterile += rec.sterile; }
+  }
+  return {nonSterile, sterile, total:nonSterile+sterile, lastDay:last};
+}
+
+function prevMonth(ym){
+  let y = parseInt(ym.slice(0,4)), m = parseInt(ym.slice(5,7)) - 1;
+  if(m === 0){ m = 12; y--; }
+  return y + '-' + String(m).padStart(2,'0');
+}
+
+// Green up / red down arrow with % change. Blank when last month has no data.
+function setCmp(el, cur, prev){
+  if(!prev){
+    el.className = el.className.replace(/\b(up|down|flat)\b/g,'').trim() + ' flat';
+    el.textContent = '';
+    return;
+  }
+  const pctChange = Math.round(((cur - prev) / prev) * 100);
+  const dir = cur > prev ? 'up' : cur < prev ? 'down' : 'flat';
+  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '▬';
+  el.className = el.className.replace(/\b(up|down|flat)\b/g,'').trim() + ' ' + dir;
+  el.textContent = arrow + ' ' + Math.abs(pctChange) + '%';
 }
 
 function render(){
@@ -481,23 +546,23 @@ function render(){
   const daysInMonth = new Date(parseInt(selectedMonth.slice(0,4)), parseInt(selectedMonth.slice(5,7)), 0).getDate();
 
   const todayRec = data[today] || emptyDayRecord();
-  const todayTotal = todayRec.nonSterile + todayRec.sterileRetail + todayRec.sterileClinic;
+  const todayTotal = todayRec.nonSterile + todayRec.sterile;
 
-  let mNonSterile=0, mSterileRetail=0, mSterileClinic=0;
+  let mNonSterile=0, mSterile=0;
   const dailyTotals = [];
   const dailyBreakdowns = [];
   const dayLabels = [];
   for(let d=1; d<=daysInMonth; d++){
     const iso = selectedMonth+'-'+String(d).padStart(2,'0');
     const rec = data[iso] || emptyDayRecord();
-    mNonSterile += rec.nonSterile; mSterileRetail += rec.sterileRetail; mSterileClinic += rec.sterileClinic;
-    dailyTotals.push(rec.nonSterile+rec.sterileRetail+rec.sterileClinic);
+    mNonSterile += rec.nonSterile; mSterile += rec.sterile;
+    dailyTotals.push(rec.nonSterile+rec.sterile);
     dailyBreakdowns.push(rec);
     dayLabels.push(String(d));
   }
   currentDailyBreakdowns = dailyBreakdowns;
   currentSelectedMonth = selectedMonth;
-  const periodTotal = mNonSterile + mSterileRetail + mSterileClinic;
+  const periodTotal = mNonSterile + mSterile;
   const pct = n => periodTotal ? Math.round((n/periodTotal)*100) : 0;
 
   const record = computeRecord();
@@ -508,7 +573,7 @@ function render(){
 
   document.getElementById('todayTotal').textContent = todayTotal;
   document.getElementById('todaySub').textContent = todayTotal
-    ? 'Non-Sterile ' + todayRec.nonSterile + ' · Sterile Retail ' + todayRec.sterileRetail + ' · Sterile Clinic ' + todayRec.sterileClinic
+    ? 'Non-Sterile ' + todayRec.nonSterile + ' · Sterile ' + todayRec.sterile
     : 'No fills logged yet today';
 
   document.getElementById('periodLabel').textContent = isCurrentMonth ? 'Month-to-Date Total Fills' : 'Total Fills';
@@ -522,10 +587,25 @@ function render(){
     document.getElementById(prefix+'Bar').style.width = pct(val)+'%';
   };
   setCard('nonSterile', mNonSterile, todayRec.nonSterile);
-  setCard('sterileRetail', mSterileRetail, todayRec.sterileRetail);
-  setCard('sterileClinic', mSterileClinic, todayRec.sterileClinic);
+  setCard('sterile', mSterile, todayRec.sterile);
 
-  const syncSourceStr = historyCache.lastSource === 'drive-auto-sync' ? ' (auto)'
+  // Compare against last month: same days so far for the current month,
+  // the full month for a past month.
+  const throughDay = isCurrentMonth ? parseInt(today.slice(8,10)) : daysInMonth;
+  const prevYm = prevMonth(selectedMonth);
+  const prev = sumMonth(data, prevYm, throughDay);
+  const prevLabel = MONTH_SHORT[parseInt(prevYm.slice(5,7))-1];
+  setCmp(document.getElementById('mtdCmp'), periodTotal, prev.total);
+  setCmp(document.getElementById('nonSterileCmp'), mNonSterile, prev.nonSterile);
+  setCmp(document.getElementById('sterileCmp'), mSterile, prev.sterile);
+  const range = isCurrentMonth
+    ? (prev.lastDay === 1 ? prevLabel + ' 1' : prevLabel + ' 1–' + prev.lastDay)
+    : 'all of ' + prevLabel;
+  document.getElementById('mtdCmpNote').textContent = prev.total
+    ? 'vs ' + prev.total + ' fills ' + range
+    : 'No ' + prevLabel + ' data to compare';
+
+  const syncSourceStr = (historyCache.lastSource === 'drive-auto-sync' || historyCache.lastSource === 'outlook-auto-sync') ? ' (auto)'
     : historyCache.lastSource === 'manual-upload' ? ' (manual upload)'
     : '';
   document.getElementById('lastUpload').textContent = historyCache.updatedAt
@@ -572,8 +652,7 @@ function render(){
                 return [
                   'Total: ' + item.raw,
                   'Non-Sterile: ' + rec.nonSterile,
-                  'Sterile Retail: ' + rec.sterileRetail,
-                  'Sterile Clinic: ' + rec.sterileClinic
+                  'Sterile: ' + rec.sterile
                 ];
               }
             }
