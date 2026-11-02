@@ -345,9 +345,9 @@
 </div>
 
 <script>
-// Data source. Still the Apps Script Web App until the Power Automate API flow
-// is live, then swap this for the flow's HTTP URL (see setup doc, Step 7).
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbysyC_OwwoWgwzAPGEsEj6pWxtxKiF5mirI2EjvSXe_tnQgSqcCf7zcSj6g4uFLaLDf8g/exec';
+// Data source: Power Automate flow "Gibsons Compound Fill – API" (Gibson - KPI
+// SharePoint). Reads history; passcode-gated edits run the Gibsons Process script.
+const WEB_APP_URL = 'https://default96d36c5fa6b1452482e0fcddb7b115.23.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/20/workflows/0279dfefbba246f29b9dd47683e2b4cd/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EVG0stGolGNF0cbg4fcLkqhOaXL75XQ-cWZuT4XiPbo';
 // Power Automate HTTP triggers only accept POST, so reads there are an empty
 // POST. Apps Script reads stay GET.
 const READS_USE_POST = !WEB_APP_URL.includes('script.google.com');
