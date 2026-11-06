@@ -716,6 +716,14 @@ loadCachedHistory();
 render();
 fetchHistory().then(render);
 setInterval(async ()=>{ await fetchHistory(); render(); }, REFRESH_INTERVAL_MS);
+
+// Full page reload every 30 min so kiosk screens pick up new versions of this page.
+// Only reloads when the site is reachable, so a Wi-Fi drop can't leave an error page.
+setInterval(()=>{
+  fetch(location.href, {cache:'no-store'})
+    .then(r => { if(r.ok) location.reload(); })
+    .catch(()=>{});
+}, 30 * 60 * 1000);
 </script>
 </body>
 </html>
