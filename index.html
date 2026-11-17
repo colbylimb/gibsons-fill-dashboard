@@ -395,8 +395,11 @@ function cacheHistory(h){
   try{ localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(h)); }catch(e){ /* ignore */ }
 }
 
+let readInFlight = false;
+
 async function fetchHistory(){
   if(!webAppConfigured()) return false;
+  readInFlight = true;
   try{
     const res = READS_USE_POST
       ? await fetch(WEB_APP_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:'', cache:'no-store'})
@@ -409,6 +412,8 @@ async function fetchHistory(){
   }catch(e){
     console.error('Fetch history failed:', e);
     return false;
+  }finally{
+    readInFlight = false;
   }
 }
 
@@ -719,11 +724,15 @@ setInterval(async ()=>{ await fetchHistory(); render(); }, REFRESH_INTERVAL_MS);
 
 // Full page reload every 30 min so kiosk screens pick up new versions of this page.
 // Only reloads when the site is reachable, so a Wi-Fi drop can't leave an error page.
-setInterval(()=>{
+// Waits for any data read to finish first; reloading mid-read leaves the
+// Power Automate flow with no one to answer and logs a failed run.
+function reloadWhenIdle(){
+  if(readInFlight){ setTimeout(reloadWhenIdle, 5000); return; }
   fetch(location.href, {cache:'no-store'})
-    .then(r => { if(r.ok) location.reload(); })
+    .then(r => { if(r.ok && !readInFlight) location.reload(); else if(r.ok) setTimeout(reloadWhenIdle, 5000); })
     .catch(()=>{});
-}, 30 * 60 * 1000);
+}
+setInterval(reloadWhenIdle, 30 * 60 * 1000 + 45 * 1000);
 </script>
 </body>
 </html>
